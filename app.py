@@ -93,8 +93,15 @@ EXAMPLE_RESUME_2_BULLETS = """- Set up deployment pipelines using Jenkins
 
 # ── Model Loading ────────────────────────────────────────────────────────────
 
+MOCK_MODE = os.environ.get("MOCK_MODEL", "0") == "1"
+
+
 def load_model():
     """Load the best available model: PPO-aligned → SFT fallback → base model."""
+    if MOCK_MODE:
+        print("💡 Running in MOCK mode — bypassing 5GB model download!")
+        return None, None
+
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -142,6 +149,34 @@ def load_model():
 
 def generate(model, tokenizer, prompt: str, max_new_tokens: int = 400) -> str:
     """Run generation and return only the response portion."""
+    if MOCK_MODE:
+        # Structured response simulations based on instruction
+        if "Analyze the following job description" in prompt:
+            return (
+                "Title: [Mocked] Software Engineer / Full Stack Developer\n"
+                "Skills: Python, React, AWS, Docker, Git\n"
+                "Level: mid\n"
+                "Responsibilities:\n"
+                "- Design, develop, and deploy front-end and back-end services.\n"
+                "- Standardize deployment pipelines via Docker containerization and AWS infrastructure.\n"
+                "- Write comprehensive documentation and conduct technical code reviews.\n"
+                "Red Flags: Expected to handle multiple unrelated roles ('wear many hats'). Mentions high-pressure, 'fast-paced' environment."
+            )
+        elif "You are an expert career coach" in prompt:
+            return (
+                "1. Fit Score: 8/10\n"
+                "2. Matching Skills: Python, React, Git, REST APIs.\n"
+                "3. Missing Skills: AWS deployments, Docker containerization.\n"
+                "4. Positioning Advice: Highlight your robust front-end and back-end programming skills. Talk about your experience writing CI/CD workflows, and express high enthusiasm for learning DevOps tools on the job."
+            )
+        elif "You are a professional resume writer" in prompt:
+            return (
+                "- Engineered responsive UI dashboards using React, accelerating customer onboarding by 35%.\n"
+                "- Designed secure REST API endpoints in Python, handling up to 500 parallel user requests with sub-100ms latency.\n"
+                "- Containerized existing legacy web application scripts using Docker, simplifying onboarding workflow and local setup."
+            )
+        return "[MOCK] Done."
+
     device = next(model.parameters()).device
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(device) for k, v in inputs.items()}
