@@ -1,0 +1,12 @@
+transformers
+datasets
+trl
+peft
+torch
+bitsandbytes
+accelerate
+wandb
+huggingface_hub
+scikit-learn
+pandas
+gradio
