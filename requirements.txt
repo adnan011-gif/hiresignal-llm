@@ -10,3 +10,7 @@ huggingface_hub
 scikit-learn
 pandas
 gradio
+pymupdf
+pytesseract
+Pillow
+python-docx

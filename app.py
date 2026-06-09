@@ -9,6 +9,7 @@ import torch
 import gradio as gr
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
+from src.file_extractor import extract_text_from_file
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MODEL_ID = "microsoft/phi-2"
@@ -164,6 +165,21 @@ def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300) -> str:
     return full_text[len(prompt):].strip()
 
 
+# ── File Upload Handler ──────────────────────────────────────────────────────
+
+def extract_file(file) -> tuple:
+    """Extract text from an uploaded file and return (text, status_message)."""
+    if file is None:
+        return "", "⚠ No file uploaded. Please select a file first."
+    try:
+        text = extract_text_from_file(file.name)
+        if not text.strip():
+            return "", "⚠ File appears empty. Please paste JD manually."
+        return text, "✅ Text extracted! Review and click Analyze JD."
+    except Exception as e:
+        return "", f"❌ Could not extract text from file. Please paste JD manually. ({e})"
+
+
 # ── Tab 1: JD Analyzer ──────────────────────────────────────────────────────
 
 def analyze_jd(job_description: str) -> str:
@@ -291,6 +307,18 @@ def build_app():
                             lines=12,
                             elem_id="jd-analyzer-input",
                         )
+                        jd_file_upload = gr.File(
+                            label="Or upload JD as PDF / Image / DOCX",
+                            file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
+                            elem_id="jd-file-upload",
+                        )
+                        extract_btn = gr.Button("Extract from File", variant="secondary", elem_id="extract-btn")
+                        extract_status = gr.Textbox(
+                            label="Upload Status",
+                            interactive=False,
+                            lines=1,
+                            elem_id="extract-status",
+                        )
                         analyze_btn = gr.Button("Analyze JD", variant="primary", elem_id="analyze-btn")
                     with gr.Column():
                         jd_output = gr.Textbox(
@@ -310,6 +338,7 @@ def build_app():
                     label="Try these example JDs",
                 )
 
+                extract_btn.click(fn=extract_file, inputs=[jd_file_upload], outputs=[jd_input, extract_status])
                 analyze_btn.click(fn=analyze_jd, inputs=[jd_input], outputs=[jd_output])
 
             # ── Tab 2: Fit Scorer ─────────────────────────────────────────
