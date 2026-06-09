@@ -93,15 +93,9 @@ EXAMPLE_RESUME_2_BULLETS = """- Set up deployment pipelines using Jenkins
 
 # ── Model Loading ────────────────────────────────────────────────────────────
 
-MOCK_MODE = os.environ.get("MOCK_MODEL", "0") == "1"
-
 
 def load_model():
     """Load the best available model: PPO-aligned → SFT fallback → base model."""
-    if MOCK_MODE:
-        print("💡 Running in MOCK mode — bypassing 5GB model download!")
-        return None, None
-
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -136,7 +130,7 @@ def load_model():
         adapter_path = SFT_ADAPTER_PATH
         print(f"✅  Loaded SFT adapter from {SFT_ADAPTER_PATH}")
     else:
-        print("⚠  No adapter found — using base model only.")
+        print("No fine-tuned adapter found, using base model")
 
     if adapter_path:
         model = PeftModel.from_pretrained(base_model, adapter_path)
@@ -147,36 +141,8 @@ def load_model():
     return model, tokenizer
 
 
-def generate(model, tokenizer, prompt: str, max_new_tokens: int = 400) -> str:
-    """Run generation and return only the response portion."""
-    if MOCK_MODE:
-        # Structured response simulations based on instruction
-        if "Analyze the following job description" in prompt:
-            return (
-                "Title: [Mocked] Software Engineer / Full Stack Developer\n"
-                "Skills: Python, React, AWS, Docker, Git\n"
-                "Level: mid\n"
-                "Responsibilities:\n"
-                "- Design, develop, and deploy front-end and back-end services.\n"
-                "- Standardize deployment pipelines via Docker containerization and AWS infrastructure.\n"
-                "- Write comprehensive documentation and conduct technical code reviews.\n"
-                "Red Flags: Expected to handle multiple unrelated roles ('wear many hats'). Mentions high-pressure, 'fast-paced' environment."
-            )
-        elif "You are an expert career coach" in prompt:
-            return (
-                "1. Fit Score: 8/10\n"
-                "2. Matching Skills: Python, React, Git, REST APIs.\n"
-                "3. Missing Skills: AWS deployments, Docker containerization.\n"
-                "4. Positioning Advice: Highlight your robust front-end and back-end programming skills. Talk about your experience writing CI/CD workflows, and express high enthusiasm for learning DevOps tools on the job."
-            )
-        elif "You are a professional resume writer" in prompt:
-            return (
-                "- Engineered responsive UI dashboards using React, accelerating customer onboarding by 35%.\n"
-                "- Designed secure REST API endpoints in Python, handling up to 500 parallel user requests with sub-100ms latency.\n"
-                "- Containerized existing legacy web application scripts using Docker, simplifying onboarding workflow and local setup."
-            )
-        return "[MOCK] Done."
-
+def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300) -> str:
+    """Run real model inference and return only the response portion."""
     device = next(model.parameters()).device
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -187,7 +153,7 @@ def generate(model, tokenizer, prompt: str, max_new_tokens: int = 400) -> str:
             max_new_tokens=max_new_tokens,
             temperature=0.7,
             do_sample=True,
-            top_p=0.9,
+            repetition_penalty=1.1,
             pad_token_id=tokenizer.eos_token_id,
         )
 
@@ -204,6 +170,8 @@ def analyze_jd(job_description: str) -> str:
     if not job_description.strip():
         return "⚠ Please paste a job description to analyze."
 
+    yield "⏳ Analyzing JD, please wait..."
+
     instruction = (
         "Analyze the following job description. Extract:\n"
         "1. Top 5 required skills\n"
@@ -216,7 +184,11 @@ def analyze_jd(job_description: str) -> str:
         f"### Job Description:\n{job_description.strip()}\n\n"
         f"### Response:\n"
     )
-    return generate(model, tokenizer, prompt)
+    try:
+        result = generate(model, tokenizer, prompt)
+        yield result
+    except Exception as e:
+        yield f"❌ Model inference failed: {e}"
 
 
 # ── Tab 2: Fit Scorer ───────────────────────────────────────────────────────
@@ -224,6 +196,8 @@ def analyze_jd(job_description: str) -> str:
 def score_fit(job_description: str, resume_summary: str) -> str:
     if not job_description.strip() or not resume_summary.strip():
         return "⚠ Please provide both a job description and your skills/resume summary."
+
+    yield "⏳ Scoring fit, please wait..."
 
     instruction = (
         "You are an expert career coach. Given a job description and a candidate's "
@@ -239,7 +213,11 @@ def score_fit(job_description: str, resume_summary: str) -> str:
         f"### Candidate Profile:\n{resume_summary.strip()}\n\n"
         f"### Response:\n"
     )
-    return generate(model, tokenizer, prompt, max_new_tokens=450)
+    try:
+        result = generate(model, tokenizer, prompt, max_new_tokens=450)
+        yield result
+    except Exception as e:
+        yield f"❌ Model inference failed: {e}"
 
 
 # ── Tab 3: Resume Tip Generator ─────────────────────────────────────────────
@@ -247,6 +225,8 @@ def score_fit(job_description: str, resume_summary: str) -> str:
 def improve_resume(job_description: str, resume_bullets: str) -> str:
     if not job_description.strip() or not resume_bullets.strip():
         return "⚠ Please provide both a job description and your current resume bullet points."
+
+    yield "⏳ Improving resume bullets, please wait..."
 
     instruction = (
         "You are a professional resume writer. Given a target job description and the "
@@ -263,7 +243,11 @@ def improve_resume(job_description: str, resume_bullets: str) -> str:
         f"### Current Resume Bullets:\n{resume_bullets.strip()}\n\n"
         f"### Response:\n"
     )
-    return generate(model, tokenizer, prompt, max_new_tokens=450)
+    try:
+        result = generate(model, tokenizer, prompt, max_new_tokens=450)
+        yield result
+    except Exception as e:
+        yield f"❌ Model inference failed: {e}"
 
 
 # ── Gradio UI ────────────────────────────────────────────────────────────────
