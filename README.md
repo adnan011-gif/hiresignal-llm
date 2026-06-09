@@ -8,6 +8,14 @@
 
 ---
 
+## 🆕 Recent Updates
+
+- ✅ **Fixed:** Real model inference — all mocked/hardcoded output has been removed; every response now comes from actual `model.generate()` calls
+- ✅ **Added:** File upload support for **PDF**, **Image** (OCR via Tesseract), **DOCX**, and **TXT** in the JD Analyzer tab
+- ✅ **Added:** 3-level model fallback chain — PPO adapter → SFT adapter → base Phi-2 (app never crashes on missing adapters)
+
+---
+
 ## 📌 Problem Statement
 Freshers apply to jobs blindly without knowing if they qualify, what skills they're missing, or how to position their resume. HireSignal solves this with a fine-tuned, RLHF-aligned LLM trained specifically on recruitment data.
 

@@ -13,26 +13,40 @@ from docx import Document
 
 def extract_from_pdf(file_path: str) -> str:
     """Extract text from all pages of a PDF using pymupdf (fitz)."""
-    doc = fitz.open(file_path)
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        raise RuntimeError(f"Could not open PDF file: {e}")
+
     pages_text = []
     for page in doc:
         pages_text.append(page.get_text())
     doc.close()
-    return "\n".join(pages_text).strip()
+
+    text = "\n".join(pages_text).strip()
+    if not text:
+        return "Could not extract any text from file"
+    return text
 
 
 def extract_from_image(file_path: str) -> str:
     """Extract text from an image file using Tesseract OCR."""
     image = Image.open(file_path)
     text = pytesseract.image_to_string(image)
-    return text.strip()
+    text = text.strip()
+    if not text:
+        return "No text detected in image"
+    return text
 
 
 def extract_from_docx(file_path: str) -> str:
     """Extract all paragraph text from a Word document."""
     doc = Document(file_path)
     paragraphs = [p.text for p in doc.paragraphs]
-    return "\n".join(paragraphs).strip()
+    text = "\n".join(paragraphs).strip()
+    if not text:
+        return "Could not extract any text from file"
+    return text
 
 
 def extract_text_from_file(file_path: str) -> str:
@@ -44,6 +58,7 @@ def extract_text_from_file(file_path: str) -> str:
 
     Raises:
         ValueError: If the file type is not supported.
+        RuntimeError: If the file cannot be read or parsed.
     """
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -55,7 +70,10 @@ def extract_text_from_file(file_path: str) -> str:
         return extract_from_docx(file_path)
     elif ext == ".txt":
         with open(file_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
+            text = f.read().strip()
+        if not text:
+            return "Could not extract any text from file"
+        return text
     else:
         raise ValueError(
             f"Unsupported file type: '{ext}'. "

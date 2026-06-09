@@ -126,12 +126,12 @@ def load_model():
     adapter_path = None
     if os.path.isdir(PPO_ADAPTER_PATH) and os.listdir(PPO_ADAPTER_PATH):
         adapter_path = PPO_ADAPTER_PATH
-        print(f"✅  Loaded PPO-aligned adapter from {PPO_ADAPTER_PATH}")
+        print(f"Loading model from: {PPO_ADAPTER_PATH}/")
     elif os.path.isdir(SFT_ADAPTER_PATH) and os.listdir(SFT_ADAPTER_PATH):
         adapter_path = SFT_ADAPTER_PATH
-        print(f"✅  Loaded SFT adapter from {SFT_ADAPTER_PATH}")
+        print(f"Loading model from: {SFT_ADAPTER_PATH}")
     else:
-        print("No fine-tuned adapter found, using base model")
+        print("Warning: No adapter found. Using base phi-2 model.")
 
     if adapter_path:
         model = PeftModel.from_pretrained(base_model, adapter_path)
@@ -278,6 +278,10 @@ CUSTOM_CSS = """
 }
 .app-header p { color: #6b7280; font-size: 1.05em; margin-top: 4px; }
 .footer-text { text-align: center; color: #9ca3af; font-size: 0.85em; margin-top: 16px; }
+.divider-text {
+    text-align: center; color: #9ca3af; font-size: 0.9em;
+    margin: 8px 0; border-top: 1px solid #e5e7eb; padding-top: 12px;
+}
 """
 
 
@@ -301,14 +305,8 @@ def build_app():
                 gr.Markdown("### Analyze any job description for skills, level, responsibilities & red flags")
                 with gr.Row():
                     with gr.Column():
-                        jd_input = gr.Textbox(
-                            label="Job Description",
-                            placeholder="Paste a job description here...",
-                            lines=12,
-                            elem_id="jd-analyzer-input",
-                        )
                         jd_file_upload = gr.File(
-                            label="Or upload JD as PDF / Image / DOCX",
+                            label="Upload JD as PDF / Image / DOCX / TXT",
                             file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
                             elem_id="jd-file-upload",
                         )
@@ -318,6 +316,13 @@ def build_app():
                             interactive=False,
                             lines=1,
                             elem_id="extract-status",
+                        )
+                        gr.HTML('<div class="divider-text">── or type manually ──</div>')
+                        jd_input = gr.Textbox(
+                            label="Job Description",
+                            placeholder="Paste a job description here...",
+                            lines=12,
+                            elem_id="jd-analyzer-input",
                         )
                         analyze_btn = gr.Button("Analyze JD", variant="primary", elem_id="analyze-btn")
                     with gr.Column():
