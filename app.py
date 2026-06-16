@@ -100,6 +100,9 @@ EXAMPLE_RESUME_2_BULLETS = """- Set up deployment pipelines using Jenkins
 def load_model():
     """Load the best available model: PPO-aligned → SFT fallback → base model."""
     global MODEL_SOURCE
+    # Optimize CPU thread usage to reduce context switching contention under memory pressure
+    torch.set_num_threads(2)
+    
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -273,9 +276,10 @@ def analyze_jd(job_description: str) -> str:
         "3. Key responsibilities in 3 bullet points\n"
         "4. Red flags or vague requirements if any"
     )
+    jd_clean = job_description.strip()[:1500]
     messages = [
         {"role": "system", "content": "You are a professional recruiting assistant specialized in job description analysis."},
-        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{job_description.strip()}"}
+        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{jd_clean}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -307,13 +311,15 @@ def score_fit(job_description: str, resume_summary: str) -> str:
         "3. Missing skills the candidate needs to develop\n"
         "4. How to position themselves for this role despite any gaps"
     )
+    jd_clean = job_description.strip()[:1500]
+    resume_clean = resume_summary.strip()[:1200]
     messages = [
         {"role": "system", "content": "You are a helpful and professional career coach."},
-        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{job_description.strip()}\n\nCandidate Profile:\n{resume_summary.strip()}"}
+        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{jd_clean}\n\nCandidate Profile:\n{resume_clean}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        result = generate(model, tokenizer, prompt, max_new_tokens=180, do_sample=False)
+        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -342,13 +348,15 @@ def improve_resume(job_description: str, resume_bullets: str) -> str:
         "4. Highlight transferable skills relevant to the target role\n"
         "Return the improved bullet points."
     )
+    jd_clean = job_description.strip()[:1500]
+    bullets_clean = resume_bullets.strip()[:1200]
     messages = [
         {"role": "system", "content": "You are an expert resume writer and editor."},
-        {"role": "user", "content": f"{instruction}\n\nTarget Job Description:\n{job_description.strip()}\n\nCurrent Resume Bullets:\n{resume_bullets.strip()}"}
+        {"role": "user", "content": f"{instruction}\n\nTarget Job Description:\n{jd_clean}\n\nCurrent Resume Bullets:\n{bullets_clean}"}
     ]
     try:
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        result = generate(model, tokenizer, prompt, max_new_tokens=180, do_sample=False)
+        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
         yield result
     except Exception as e:
         import traceback
