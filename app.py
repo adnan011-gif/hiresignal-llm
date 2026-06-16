@@ -12,7 +12,7 @@ from peft import PeftModel
 from src.file_extractor import extract_text_from_file
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL_ID = "Qwen/Qwen2-1.5B-Instruct"
+MODEL_ID = "Qwen/Qwen2-0.5B-Instruct"
 PPO_ADAPTER_PATH = "outputs/ppo_model"
 SFT_ADAPTER_PATH = "outputs/sft_model/final_adapter"
 
@@ -401,19 +401,19 @@ def build_app():
         if MODEL_SOURCE == "base":
             gr.HTML("""
             <div class="warning-banner" style="background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
-                ℹ️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Using the base <code>Qwen2-1.5B-Instruct</code> model.
+                ℹ️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Using the base <code>Qwen2-0.5B-Instruct</code> model.
             </div>
             """)
         elif MODEL_SOURCE == "base_incompatible":
             gr.HTML("""
             <div class="warning-banner" style="background-color: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
-                ⚠️ <strong>Incompatible Adapters:</strong> Fine-tuned adapters in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code> are incompatible with <code>Qwen2-1.5B-Instruct</code> (they were trained for the older <code>phi-2</code> model). Falling back to the base <code>Qwen2-1.5B-Instruct</code> model.
+                ⚠️ <strong>Incompatible Adapters:</strong> Fine-tuned adapters in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code> are incompatible with <code>Qwen2-0.5B-Instruct</code> (they were trained for the older <code>phi-2</code> model). Falling back to the base <code>Qwen2-0.5B-Instruct</code> model.
             </div>
             """)
 
         gr.HTML("""
         <div class="hardware-banner" style="background-color: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
-            ⚡ <strong>Hardware Optimized:</strong> Switched model to <code>Qwen2-1.5B-Instruct</code> in <code>bfloat16</code>. Memory usage reduced to ~3.0 GB RAM, running fast on CPU without disk swap thrashing (under 30s).
+            ⚡ <strong>Hardware Optimized:</strong> Switched model to <code>Qwen2-0.5B-Instruct</code> in <code>bfloat16</code>. Memory usage reduced to ~1.0 GB RAM, running fast on CPU without disk swap thrashing (under 10s).
         </div>
         """)
 
@@ -588,7 +588,7 @@ def build_app():
         # ── Footer ────────────────────────────────────────────────────────
         gr.HTML("""
         <div class="footer-text">
-            Built with Qwen2-1.5B-Instruct + QLoRA + PPO | Not a substitute for human judgment
+            Built with Qwen2-0.5B-Instruct + QLoRA + PPO | Not a substitute for human judgment
         </div>
         """)
 
