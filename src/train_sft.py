@@ -1,6 +1,6 @@
 """
 Supervised Fine-Tuning (SFT) Script for HireSignal.
-Fine-tunes microsoft/phi-2 on candidate scoring and resume suggestions
+Fine-tunes Qwen/Qwen2-1.5B-Instruct on candidate scoring and resume suggestions
 using QLoRA quantization, PEFT, and W&B logging.
 """
 
@@ -68,11 +68,12 @@ def train_sft():
     print(f"Loaded validation samples: {len(dataset['validation'])}")
 
     print("=== Step 3: Loading Tokenizer ===")
-    model_id = "microsoft/phi-2"
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model_id = "Qwen/Qwen2-1.5B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     
     # Configure padding
-    tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     print("=== Step 4: Configuring QLoRA Quantization ===")
@@ -93,12 +94,10 @@ def train_sft():
         device_map = {"": "cpu"}
 
     print("=== Step 5: Loading Base Model ===")
-    # trust_remote_code=True is required for microsoft/phi-2
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=bnb_config,
         device_map=device_map,
-        trust_remote_code=True
     )
     
     # Prepare model for 4-bit training if CUDA is active

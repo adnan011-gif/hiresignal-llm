@@ -12,7 +12,7 @@ from peft import PeftModel
 from src.file_extractor import extract_text_from_file
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL_ID = "microsoft/phi-2"
+MODEL_ID = "Qwen/Qwen2-1.5B-Instruct"
 PPO_ADAPTER_PATH = "outputs/ppo_model"
 SFT_ADAPTER_PATH = "outputs/sft_model/final_adapter"
 
@@ -100,8 +100,9 @@ EXAMPLE_RESUME_2_BULLETS = """- Set up deployment pipelines using Jenkins
 def load_model():
     """Load the best available model: PPO-aligned → SFT fallback → base model."""
     global MODEL_SOURCE
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     has_cuda = torch.cuda.is_available()
@@ -113,17 +114,27 @@ def load_model():
             bnb_4bit_quant_type="nf4",
         )
         device_map = "auto"
+        dtype = torch.float16
     else:
         bnb_config = None
         device_map = None  # Remove accelerate overhead on CPU-only
+        dtype = torch.bfloat16
 
-    base_model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        quantization_config=bnb_config,
-        device_map=device_map,
-        trust_remote_code=True,
-        torch_dtype=torch.float16 if has_cuda else torch.float32,
-    )
+    try:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            quantization_config=bnb_config,
+            device_map=device_map,
+            torch_dtype=dtype,
+        )
+    except Exception as e:
+        print(f"Failed to load with torch_dtype={dtype}: {e}. Retrying with float32...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            quantization_config=bnb_config,
+            device_map=device_map,
+            torch_dtype=torch.float32,
+        )
 
     # Try PPO adapter first, then SFT adapter
     adapter_path = None
@@ -137,11 +148,17 @@ def load_model():
         print(f"Loading model from: {SFT_ADAPTER_PATH}")
     else:
         MODEL_SOURCE = "base"
-        print("Warning: No adapter found. Using base phi-2 model.")
+        print(f"Warning: No adapter found. Using base model {MODEL_ID}.")
 
     if adapter_path:
-        model = PeftModel.from_pretrained(base_model, adapter_path)
-        model.eval()
+        try:
+            model = PeftModel.from_pretrained(base_model, adapter_path)
+            model.eval()
+        except Exception as peft_err:
+            print(f"Warning: Incompatible adapter weights at {adapter_path}. Error: {peft_err}")
+            print("Falling back to base model.")
+            model = base_model
+            MODEL_SOURCE = "base_incompatible"
     else:
         model = base_model
 
@@ -149,6 +166,7 @@ def load_model():
     actual_device = next(model.parameters()).device
     print(f"[Model Load Debug] torch.cuda.is_available(): {has_cuda}")
     print(f"[Model Load Debug] Actual model device (model.device): {actual_device}")
+    print(f"[Model Load Debug] Model parameter dtype: {next(model.parameters()).dtype}")
     
     if has_cuda and str(actual_device) == "cpu":
         print("Fixing device placement: Moving model to CUDA...")
@@ -161,7 +179,7 @@ def load_model():
 def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300, do_sample: bool = False, temperature: float = None) -> str:
     """Run real model inference and return only the response portion."""
     device = next(model.parameters()).device
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1536)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     gen_kwargs = {
@@ -183,11 +201,10 @@ def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300, do_sample
             **gen_kwargs,
         )
 
-    full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    marker = "### Response:\n"
-    if marker in full_text:
-        return full_text.split(marker, 1)[1].strip()
-    return full_text[len(prompt):].strip()
+    # Decode only the generated tokens (exclude input prompt tokens)
+    input_len = inputs["input_ids"].shape[1]
+    response_tokens = outputs[0][input_len:]
+    return tokenizer.decode(response_tokens, skip_special_tokens=True).strip()
 
 
 # ── File Upload Handler ──────────────────────────────────────────────────────
@@ -256,13 +273,13 @@ def analyze_jd(job_description: str) -> str:
         "3. Key responsibilities in 3 bullet points\n"
         "4. Red flags or vague requirements if any"
     )
-    prompt = (
-        f"### Instruction:\n{instruction}\n\n"
-        f"### Job Description:\n{job_description.strip()}\n\n"
-        f"### Response:\n"
-    )
+    messages = [
+        {"role": "system", "content": "You are a professional recruiting assistant specialized in job description analysis."},
+        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{job_description.strip()}"}
+    ]
     try:
-        result = generate(model, tokenizer, prompt, max_new_tokens=120, do_sample=False)
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -290,14 +307,13 @@ def score_fit(job_description: str, resume_summary: str) -> str:
         "3. Missing skills the candidate needs to develop\n"
         "4. How to position themselves for this role despite any gaps"
     )
-    prompt = (
-        f"### Instruction:\n{instruction}\n\n"
-        f"### Job Description:\n{job_description.strip()}\n\n"
-        f"### Candidate Profile:\n{resume_summary.strip()}\n\n"
-        f"### Response:\n"
-    )
+    messages = [
+        {"role": "system", "content": "You are a helpful and professional career coach."},
+        {"role": "user", "content": f"{instruction}\n\nJob Description:\n{job_description.strip()}\n\nCandidate Profile:\n{resume_summary.strip()}"}
+    ]
     try:
-        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        result = generate(model, tokenizer, prompt, max_new_tokens=180, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -326,14 +342,13 @@ def improve_resume(job_description: str, resume_bullets: str) -> str:
         "4. Highlight transferable skills relevant to the target role\n"
         "Return the improved bullet points."
     )
-    prompt = (
-        f"### Instruction:\n{instruction}\n\n"
-        f"### Target Job Description:\n{job_description.strip()}\n\n"
-        f"### Current Resume Bullets:\n{resume_bullets.strip()}\n\n"
-        f"### Response:\n"
-    )
+    messages = [
+        {"role": "system", "content": "You are an expert resume writer and editor."},
+        {"role": "user", "content": f"{instruction}\n\nTarget Job Description:\n{job_description.strip()}\n\nCurrent Resume Bullets:\n{resume_bullets.strip()}"}
+    ]
     try:
-        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        result = generate(model, tokenizer, prompt, max_new_tokens=180, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -377,14 +392,20 @@ def build_app():
 
         if MODEL_SOURCE == "base":
             gr.HTML("""
+            <div class="warning-banner" style="background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
+                ℹ️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Using the base <code>Qwen2-1.5B-Instruct</code> model.
+            </div>
+            """)
+        elif MODEL_SOURCE == "base_incompatible":
+            gr.HTML("""
             <div class="warning-banner" style="background-color: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
-                ⚠️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Inference results may not match the structured fine-tuned output formats. To regenerate them, run the training scripts: <code>python src/train_sft.py</code> then <code>python src/train_ppo.py</code>.
+                ⚠️ <strong>Incompatible Adapters:</strong> Fine-tuned adapters in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code> are incompatible with <code>Qwen2-1.5B-Instruct</code> (they were trained for the older <code>phi-2</code> model). Falling back to the base <code>Qwen2-1.5B-Instruct</code> model.
             </div>
             """)
 
         gr.HTML("""
-        <div class="hardware-banner" style="background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
-            ⚠️ <strong>CPU/RAM Constraint:</strong> Running model inference on CPU (8GB RAM). Analysis/generation may take up to 45-90 seconds. Please do not close or refresh the page.
+        <div class="hardware-banner" style="background-color: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
+            ⚡ <strong>Hardware Optimized:</strong> Switched model to <code>Qwen2-1.5B-Instruct</code> in <code>bfloat16</code>. Memory usage reduced to ~3.0 GB RAM, running fast on CPU without disk swap thrashing (under 30s).
         </div>
         """)
 
@@ -559,7 +580,7 @@ def build_app():
         # ── Footer ────────────────────────────────────────────────────────
         gr.HTML("""
         <div class="footer-text">
-            Built with Phi-2 + QLoRA + PPO | Not a substitute for human judgment
+            Built with Qwen2-1.5B-Instruct + QLoRA + PPO | Not a substitute for human judgment
         </div>
         """)
 

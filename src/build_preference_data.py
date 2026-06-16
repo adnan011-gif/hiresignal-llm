@@ -49,7 +49,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL_ID = "microsoft/phi-2"
+MODEL_ID = "Qwen/Qwen2-1.5B-Instruct"
 ADAPTER_PATH = "outputs/sft_model/final_adapter"
 VAL_DATA_PATH = "data/processed/val.json"
 OUTPUT_PATH = "data/processed/preference_data.json"
@@ -144,10 +144,11 @@ def generate_response(model, tokenizer, prompt: str, temperature: float) -> str:
 # ── Model Loading ───────────────────────────────────────────────────────────
 
 def load_model_and_tokenizer():
-    """Load phi-2 base model with 4-bit quantization and apply LoRA adapter."""
+    """Load base model with 4-bit quantization and apply LoRA adapter."""
     print("Loading tokenizer ...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     has_cuda = torch.cuda.is_available()

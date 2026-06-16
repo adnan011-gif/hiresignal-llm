@@ -1,6 +1,6 @@
 """
 PPO (Proximal Policy Optimization) Training Script for HireSignal.
-Optimizes the SFT-tuned phi-2 model using the trained DistilBERT Reward Model.
+Optimizes the SFT-tuned Qwen2-1.5B model using the trained DistilBERT Reward Model.
 
 Pipeline position:
   SFT Model (policy) + Reward Model (critic) → PPO update → Aligned Model
@@ -31,7 +31,7 @@ from peft import PeftModel
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL_ID = "microsoft/phi-2"
+MODEL_ID = "Qwen/Qwen2-1.5B-Instruct"
 SFT_ADAPTER_PATH = "outputs/sft_model/final_adapter"
 REWARD_MODEL_PATH = "outputs/reward_model/best_reward_model.pt"
 REWARD_TOKENIZER_PATH = "outputs/reward_model/tokenizer"
@@ -80,10 +80,11 @@ def build_prompt(instruction: str, job_description: str) -> str:
 # ── Model Loaders ──────────────────────────────────────────────────────────
 
 def load_sft_model_and_tokenizer():
-    """Load the SFT-tuned phi-2 with LoRA adapter, wrapped with a value head for PPO."""
+    """Load the SFT-tuned Qwen2-1.5B with LoRA adapter, wrapped with a value head for PPO."""
     print("🔧  Loading tokenizer ...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"  # Left padding for generation in PPO
 
     has_cuda = torch.cuda.is_available()
@@ -106,7 +107,6 @@ def load_sft_model_and_tokenizer():
         MODEL_ID,
         quantization_config=bnb_config,
         device_map=device_map,
-        trust_remote_code=True,
         torch_dtype=torch.float16 if has_cuda else torch.float32,
     )
 

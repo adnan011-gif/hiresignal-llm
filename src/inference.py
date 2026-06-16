@@ -1,6 +1,6 @@
 """
 Inference Script for HireSignal.
-Loads the base microsoft/phi-2 model and the fine-tuned LoRA adapter,
+Loads the base Qwen/Qwen2-1.5B-Instruct model and the fine-tuned LoRA adapter,
 then runs side-by-side comparisons on realistic job descriptions.
 """
 
@@ -9,7 +9,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
 
 # ── Constants ────────────────────────────────────────────────────────────────
-MODEL_ID = "microsoft/phi-2"
+MODEL_ID = "Qwen/Qwen2-1.5B-Instruct"
 ADAPTER_PATH = "outputs/sft_model/final_adapter"
 
 # ── Test Job Descriptions ────────────────────────────────────────────────────
@@ -111,15 +111,16 @@ def build_prompt(job_description: str) -> str:
 
 
 def load_tokenizer():
-    """Load and configure the tokenizer for phi-2."""
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
+    """Load and configure the tokenizer for Qwen."""
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     return tokenizer
 
 
 def load_base_model(tokenizer):
-    """Load the base phi-2 model with 4-bit quantization (or CPU fallback)."""
+    """Load the base Qwen model with 4-bit quantization (or CPU fallback)."""
     has_cuda = torch.cuda.is_available()
 
     if has_cuda:
@@ -139,7 +140,6 @@ def load_base_model(tokenizer):
         MODEL_ID,
         quantization_config=bnb_config,
         device_map=device_map,
-        trust_remote_code=True,
         torch_dtype=torch.float16 if has_cuda else torch.float32,
     )
     return model
@@ -197,7 +197,7 @@ def main():
     tokenizer = load_tokenizer()
 
     # ── Load base model ───────────────────────────────────────────────────
-    print("🔧  Loading base model (microsoft/phi-2) ...")
+    print(f"🔧  Loading base model ({MODEL_ID}) ...")
     base_model = load_base_model(tokenizer)
 
     # ── Load fine-tuned model ─────────────────────────────────────────────
