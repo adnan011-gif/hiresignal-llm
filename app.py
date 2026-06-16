@@ -115,7 +115,7 @@ def load_model():
         device_map = "auto"
     else:
         bnb_config = None
-        device_map = {"": "cpu"}
+        device_map = None  # Remove accelerate overhead on CPU-only
 
     base_model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
@@ -145,23 +145,42 @@ def load_model():
     else:
         model = base_model
 
+    # Diagnose and print device info
+    actual_device = next(model.parameters()).device
+    print(f"[Model Load Debug] torch.cuda.is_available(): {has_cuda}")
+    print(f"[Model Load Debug] Actual model device (model.device): {actual_device}")
+    
+    if has_cuda and str(actual_device) == "cpu":
+        print("Fixing device placement: Moving model to CUDA...")
+        model = model.to("cuda")
+        print(f"[Model Load Debug] New model device after fix: {next(model.parameters()).device}")
+
     return model, tokenizer
 
 
-def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300) -> str:
+def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300, do_sample: bool = False, temperature: float = None) -> str:
     """Run real model inference and return only the response portion."""
     device = next(model.parameters()).device
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
+    gen_kwargs = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": do_sample,
+        "pad_token_id": tokenizer.eos_token_id,
+    }
+    
+    if do_sample:
+        if temperature is not None:
+            gen_kwargs["temperature"] = temperature
+        else:
+            gen_kwargs["temperature"] = 0.7
+        gen_kwargs["repetition_penalty"] = 1.1
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=0.7,
-            do_sample=True,
-            repetition_penalty=1.1,
-            pad_token_id=tokenizer.eos_token_id,
+            **gen_kwargs,
         )
 
     full_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -243,7 +262,7 @@ def analyze_jd(job_description: str) -> str:
         f"### Response:\n"
     )
     try:
-        result = generate(model, tokenizer, prompt)
+        result = generate(model, tokenizer, prompt, max_new_tokens=120, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -278,7 +297,7 @@ def score_fit(job_description: str, resume_summary: str) -> str:
         f"### Response:\n"
     )
     try:
-        result = generate(model, tokenizer, prompt, max_new_tokens=450)
+        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -314,7 +333,7 @@ def improve_resume(job_description: str, resume_bullets: str) -> str:
         f"### Response:\n"
     )
     try:
-        result = generate(model, tokenizer, prompt, max_new_tokens=450)
+        result = generate(model, tokenizer, prompt, max_new_tokens=150, do_sample=False)
         yield result
     except Exception as e:
         import traceback
@@ -362,6 +381,12 @@ def build_app():
                 ⚠️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Inference results may not match the structured fine-tuned output formats. To regenerate them, run the training scripts: <code>python src/train_sft.py</code> then <code>python src/train_ppo.py</code>.
             </div>
             """)
+
+        gr.HTML("""
+        <div class="hardware-banner" style="background-color: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
+            ⚠️ <strong>CPU/RAM Constraint:</strong> Running model inference on CPU (8GB RAM). Analysis/generation may take up to 45-90 seconds. Please do not close or refresh the page.
+        </div>
+        """)
 
         with gr.Tabs():
 
