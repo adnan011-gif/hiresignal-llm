@@ -16,6 +16,8 @@ MODEL_ID = "microsoft/phi-2"
 PPO_ADAPTER_PATH = "outputs/ppo_model"
 SFT_ADAPTER_PATH = "outputs/sft_model/final_adapter"
 
+MODEL_SOURCE = "base"
+
 # ── Example JDs ──────────────────────────────────────────────────────────────
 
 EXAMPLE_JD_VAGUE = """Full Stack Developer (Fresher Welcome!)
@@ -97,6 +99,7 @@ EXAMPLE_RESUME_2_BULLETS = """- Set up deployment pipelines using Jenkins
 
 def load_model():
     """Load the best available model: PPO-aligned → SFT fallback → base model."""
+    global MODEL_SOURCE
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -126,11 +129,14 @@ def load_model():
     adapter_path = None
     if os.path.isdir(PPO_ADAPTER_PATH) and os.listdir(PPO_ADAPTER_PATH):
         adapter_path = PPO_ADAPTER_PATH
+        MODEL_SOURCE = "ppo"
         print(f"Loading model from: {PPO_ADAPTER_PATH}/")
     elif os.path.isdir(SFT_ADAPTER_PATH) and os.listdir(SFT_ADAPTER_PATH):
         adapter_path = SFT_ADAPTER_PATH
+        MODEL_SOURCE = "sft"
         print(f"Loading model from: {SFT_ADAPTER_PATH}")
     else:
+        MODEL_SOURCE = "base"
         print("Warning: No adapter found. Using base phi-2 model.")
 
     if adapter_path:
@@ -167,24 +173,60 @@ def generate(model, tokenizer, prompt: str, max_new_tokens: int = 300) -> str:
 
 # ── File Upload Handler ──────────────────────────────────────────────────────
 
+def _resolve_file_path(file) -> str:
+    """Resolve the file path from a Gradio file upload object.
+    Supports Gradio 6 FileData (.path), older Gradio (.name), dicts, and strings."""
+    if isinstance(file, list):
+        if not file:
+            return None
+        file = file[0]
+
+    # Gradio 6+: FileData object with .path attribute
+    if hasattr(file, "path"):
+        return file.path
+    # Older Gradio: NamedString / TemporaryFile with .name
+    if hasattr(file, "name"):
+        return file.name
+    # Plain string path
+    if isinstance(file, str):
+        return file
+    # Dict format (some Gradio versions)
+    if isinstance(file, dict) and "path" in file:
+        return file["path"]
+
+    return None
+
+
 def extract_file(file) -> tuple:
-    """Extract text from an uploaded file and return (text, status_message)."""
+    """Extract text from an uploaded file and return (text, status_message).
+    Always returns a 2-tuple so both the text box and status box get updated."""
     if file is None:
         return "", "⚠ No file uploaded. Please select a file first."
     try:
-        text = extract_text_from_file(file.name)
-        if not text.strip():
-            return "", "⚠ File appears empty. Please paste JD manually."
-        return text, "✅ Text extracted! Review and click Analyze JD."
+        file_path = _resolve_file_path(file)
+        if not file_path:
+            return "", "❌ Could not resolve file path from upload. Please try again."
+
+        print(f"[extract_file] Resolved file path: {file_path}")
+        text = extract_text_from_file(file_path)
+
+        if not text or not text.strip():
+            return "", "❌ File appears empty — no text could be extracted."
+
+        print(f"[extract_file] Extracted {len(text)} characters from: {file_path}")
+        return text.strip(), f"✅ Text extracted ({len(text)} chars). Review and click the action button."
     except Exception as e:
-        return "", f"❌ Could not extract text from file. Please paste JD manually. ({e})"
+        import traceback
+        traceback.print_exc()
+        err_msg = f"❌ Extraction failed: {str(e)}"
+        return "", err_msg
 
 
 # ── Tab 1: JD Analyzer ──────────────────────────────────────────────────────
 
 def analyze_jd(job_description: str) -> str:
-    if not job_description.strip():
-        return "⚠ Please paste a job description to analyze."
+    if not job_description or not job_description.strip():
+        raise gr.Error("Job Description is empty — click 'Extract from File' first or paste text manually.")
 
     yield "⏳ Analyzing JD, please wait..."
 
@@ -204,14 +246,20 @@ def analyze_jd(job_description: str) -> str:
         result = generate(model, tokenizer, prompt)
         yield result
     except Exception as e:
-        yield f"❌ Model inference failed: {e}"
+        import traceback
+        traceback.print_exc()
+        err_msg = f"Model inference failed: {e}"
+        gr.Warning(err_msg)
+        yield f"❌ {err_msg}"
 
 
 # ── Tab 2: Fit Scorer ───────────────────────────────────────────────────────
 
 def score_fit(job_description: str, resume_summary: str) -> str:
-    if not job_description.strip() or not resume_summary.strip():
-        return "⚠ Please provide both a job description and your skills/resume summary."
+    if not job_description or not job_description.strip():
+        raise gr.Error("Job Description is empty — click 'Extract JD from File' first or paste text manually.")
+    if not resume_summary or not resume_summary.strip():
+        raise gr.Error("Resume is empty — click 'Extract Resume from File' first or paste your skills/summary manually.")
 
     yield "⏳ Scoring fit, please wait..."
 
@@ -233,14 +281,20 @@ def score_fit(job_description: str, resume_summary: str) -> str:
         result = generate(model, tokenizer, prompt, max_new_tokens=450)
         yield result
     except Exception as e:
-        yield f"❌ Model inference failed: {e}"
+        import traceback
+        traceback.print_exc()
+        err_msg = f"Model inference failed: {e}"
+        gr.Warning(err_msg)
+        yield f"❌ {err_msg}"
 
 
 # ── Tab 3: Resume Tip Generator ─────────────────────────────────────────────
 
 def improve_resume(job_description: str, resume_bullets: str) -> str:
-    if not job_description.strip() or not resume_bullets.strip():
-        return "⚠ Please provide both a job description and your current resume bullet points."
+    if not job_description or not job_description.strip():
+        raise gr.Error("Target Job Description is empty — click 'Extract JD from File' first or paste text manually.")
+    if not resume_bullets or not resume_bullets.strip():
+        raise gr.Error("Resume bullets are empty — click 'Extract Resume from File' first or paste your bullet points manually.")
 
     yield "⏳ Improving resume bullets, please wait..."
 
@@ -263,7 +317,11 @@ def improve_resume(job_description: str, resume_bullets: str) -> str:
         result = generate(model, tokenizer, prompt, max_new_tokens=450)
         yield result
     except Exception as e:
-        yield f"❌ Model inference failed: {e}"
+        import traceback
+        traceback.print_exc()
+        err_msg = f"Model inference failed: {e}"
+        gr.Warning(err_msg)
+        yield f"❌ {err_msg}"
 
 
 # ── Gradio UI ────────────────────────────────────────────────────────────────
@@ -297,6 +355,13 @@ def build_app():
             <p>Fine-tuned using SFT + RLHF on recruitment data. Paste any JD to extract skills, score your fit, and improve your resume.</p>
         </div>
         """)
+
+        if MODEL_SOURCE == "base":
+            gr.HTML("""
+            <div class="warning-banner" style="background-color: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 16px; font-weight: 500; font-size: 0.95em;">
+                ⚠️ <strong>Running on Base Model:</strong> Fine-tuned weights not found in <code>outputs/ppo_model</code> or <code>outputs/sft_model/final_adapter</code>. Inference results may not match the structured fine-tuned output formats. To regenerate them, run the training scripts: <code>python src/train_sft.py</code> then <code>python src/train_ppo.py</code>.
+            </div>
+            """)
 
         with gr.Tabs():
 
@@ -351,12 +416,31 @@ def build_app():
                 gr.Markdown("### See how well you match a role — get a score, gap analysis & positioning tips")
                 with gr.Row():
                     with gr.Column():
+                        fit_jd_file = gr.File(
+                            label="Upload JD as PDF / Image / DOCX / TXT (Optional)",
+                            file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
+                            elem_id="fit-jd-file",
+                        )
+                        fit_jd_extract_btn = gr.Button("Extract JD from File", variant="secondary")
+                        fit_jd_status = gr.Textbox(label="JD Upload Status", interactive=False, lines=1)
+                        
                         fit_jd_input = gr.Textbox(
                             label="Job Description",
                             placeholder="Paste the target job description...",
                             lines=8,
                             elem_id="fit-jd-input",
                         )
+                        
+                        gr.HTML('<div class="divider-text">── and ──</div>')
+                        
+                        fit_resume_file = gr.File(
+                            label="Upload Resume as PDF / Image / DOCX / TXT",
+                            file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
+                            elem_id="fit-resume-file",
+                        )
+                        fit_resume_extract_btn = gr.Button("Extract Resume from File", variant="secondary")
+                        fit_resume_status = gr.Textbox(label="Resume Upload Status", interactive=False, lines=1)
+                        
                         fit_resume_input = gr.Textbox(
                             label="Your Skills / Resume Summary",
                             placeholder="List your skills, experience, and relevant background...",
@@ -381,6 +465,8 @@ def build_app():
                     label="Try these examples",
                 )
 
+                fit_jd_extract_btn.click(fn=extract_file, inputs=[fit_jd_file], outputs=[fit_jd_input, fit_jd_status])
+                fit_resume_extract_btn.click(fn=extract_file, inputs=[fit_resume_file], outputs=[fit_resume_input, fit_resume_status])
                 fit_btn.click(fn=score_fit, inputs=[fit_jd_input, fit_resume_input], outputs=[fit_output])
 
             # ── Tab 3: Resume Tip Generator ───────────────────────────────
@@ -388,12 +474,31 @@ def build_app():
                 gr.Markdown("### Rewrite your resume bullets to match a target JD — with metrics & keywords")
                 with gr.Row():
                     with gr.Column():
+                        tip_jd_file = gr.File(
+                            label="Upload Target JD as PDF / Image / DOCX / TXT (Optional)",
+                            file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
+                            elem_id="tip-jd-file",
+                        )
+                        tip_jd_extract_btn = gr.Button("Extract JD from File", variant="secondary")
+                        tip_jd_status = gr.Textbox(label="JD Upload Status", interactive=False, lines=1)
+                        
                         resume_jd_input = gr.Textbox(
                             label="Target Job Description",
                             placeholder="Paste the JD you're applying to...",
                             lines=6,
                             elem_id="resume-jd-input",
                         )
+                        
+                        gr.HTML('<div class="divider-text">── and ──</div>')
+                        
+                        tip_resume_file = gr.File(
+                            label="Upload Resume as PDF / Image / DOCX / TXT",
+                            file_types=[".pdf", ".png", ".jpg", ".jpeg", ".docx", ".txt"],
+                            elem_id="tip-resume-file",
+                        )
+                        tip_resume_extract_btn = gr.Button("Extract Resume from File", variant="secondary")
+                        tip_resume_status = gr.Textbox(label="Resume Upload Status", interactive=False, lines=1)
+                        
                         resume_bullets_input = gr.Textbox(
                             label="Current Resume Bullet Points",
                             placeholder="Paste your existing resume bullets (one per line)...",
@@ -418,6 +523,8 @@ def build_app():
                     label="Try these examples",
                 )
 
+                tip_jd_extract_btn.click(fn=extract_file, inputs=[tip_jd_file], outputs=[resume_jd_input, tip_jd_status])
+                tip_resume_extract_btn.click(fn=extract_file, inputs=[tip_resume_file], outputs=[resume_bullets_input, tip_resume_status])
                 resume_btn.click(
                     fn=improve_resume,
                     inputs=[resume_jd_input, resume_bullets_input],
@@ -441,9 +548,20 @@ if __name__ == "__main__":
     model, tokenizer = load_model()
     print("🚀  Building Gradio interface ...")
     app = build_app()
-    app.launch(
-        server_name="0.0.0.0",
-        server_port=7860,
-        theme=gr.themes.Soft(),
-        css=CUSTOM_CSS,
-    )
+    port = int(os.environ.get("GRADIO_SERVER_PORT", 7860))
+    for p in range(port, port + 10):
+        try:
+            print(f"Attempting to launch Gradio app on port {p}...")
+            app.launch(
+                server_name="0.0.0.0",
+                server_port=p,
+                show_error=True,
+                theme=gr.themes.Soft(),
+                css=CUSTOM_CSS,
+            )
+            break
+        except OSError as e:
+            if "address already in use" in str(e).lower() or "port" in str(e).lower():
+                print(f"Port {p} is in use, trying port {p+1}...")
+                continue
+            raise e
